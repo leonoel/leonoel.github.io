@@ -25,18 +25,29 @@ Agents are one of the most overlooked features of Clojure. Good explanations on 
 Agents should be your default weapon each time you have to manage side effects. The ability to manage side effect properly is fundamental in asynchronous programming because most asynchronous apis make extensive use of side effecting functions to generate events saying the job you requested is done, and holding the result of the job (which may be an error). This programming style is commonly referred to as "callback-based", and is well known for its inability to scale in complexity.
 
 
-## Process = control flow + behavior
+## Reactive process = control flow + behavior
 
 Agents & Transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
 * Transducers are reducing function transformers, and reducing functions are the way you interact with agents
 * Reducing functions produced by transducers may have side-effects, and agents are side-effect-friendly
 
+> any respectable Scala type has flatMap
+
+> any respectable Clojure type supports transducers
 
 ```clojure
 (def ps (partial partial send))
 ```
 
-> any respectable Scala type has flatMap
 
-> any respectable Clojure type supports transducers
+
+## Proactive process with context-aware transducers
+
+ˋˋˋclojure
+(defmacro task [& body]
+  ˋ(fn [rf#]
+     (send *agent* #(rf# % (do ˜@body)))
+     rf#))
+(task (slow-inc 0))
+ˋˋˋ

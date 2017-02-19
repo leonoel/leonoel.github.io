@@ -27,6 +27,8 @@ Agents should be your default weapon each time you have to manage side effects. 
 
 ## Reactive process = control flow + behavior
 
+A reducing function is any function such that the type of the return value is compatible with the type of the first argument.
+
 Agents & Transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
 * Transducers are reducing function transformers, and reducing functions are the way you interact with agents
@@ -36,17 +38,27 @@ Agents & Transducers are complementary.
 
 > any respectable Clojure type supports transducers
 
+First, let's define the ˋpsˋ function (for *process*). Given an agent and a reducing function, ˋpsˋ will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
 ```clojure
 (def ps (partial partial send))
 ```
 
+Next, let's define the ˋ!ˋ function (say *bang*). Given a side-effecting function and optional arguments, ˋ!ˋ will apply the side-effecting function to the arguments and return the function.
+ˋˋˋclojure
+(defn !
+  ([f] (f) f)
+  ([f a] (f a) f)
+  ([f a b] (f a b) f)
+  ([f a b c] (f a b c) f)
+  ([f a b c & ds] (apply f a b c ds) f))
+ˋˋˋ
 
 
 ## Proactive process with context-aware transducers
 
 ˋˋˋclojure
 (defmacro task [& body]
-  ˋ(fn [rf#]
+  \ˋ(fn [rf#]
      (send *agent* #(rf# % (do ˜@body)))
      rf#))
 (task (slow-inc 0))

@@ -38,28 +38,29 @@ Agents & Transducers are complementary.
 
 > any respectable Clojure type supports transducers
 
-First, let's define the ˋpsˋ function (for *process*). Given an agent and a reducing function, ˋpsˋ will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
+First, let's define the `ps` function (for *process*). Given an agent and a reducing function, `ps` will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
 ```clojure
 (def ps (partial partial send))
 ```
 
-Next, let's define the ˋ!ˋ function (say *bang*). Given a side-effecting function and optional arguments, ˋ!ˋ will apply the side-effecting function to the arguments and return the function.
-ˋˋˋclojure
+Next, let's define the `!` function (say *bang*). Given a side-effecting function and optional arguments, `!` will apply the side-effecting function to the arguments and return the function.
+```clojure
 (defn !
   ([f] (f) f)
   ([f a] (f a) f)
   ([f a b] (f a b) f)
   ([f a b c] (f a b c) f)
   ([f a b c & ds] (apply f a b c ds) f))
-ˋˋˋ
+```
 
 
 ## Proactive process with context-aware transducers
 
-ˋˋˋclojure
+```clojure
 (defmacro task [& body]
-  ``ˋ``(fn [rf#]
-         (send *agent* #(rf# % (do ˜@body)))
-         rf#))
+  `` ` ``(fn [rf#]
+           (send *agent* #(rf# % (do ˜@body)))
+           rf#))
 (task (slow-inc 0))
-ˋˋˋ
+```
+

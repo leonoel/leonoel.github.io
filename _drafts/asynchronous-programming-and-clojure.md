@@ -58,7 +58,7 @@ Next, let's define the `!` function (say *bang*). Given a side-effecting functio
 
 ```clojure
 (defmacro task [& body]
-  `` ` ``(fn [rf#]
+  `(fn [rf#]
            (send *agent* #(rf# % (do ˜@body)))
            rf#))
 (task (slow-inc 0))

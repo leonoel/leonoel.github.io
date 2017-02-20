@@ -27,7 +27,32 @@ Agents should be your default weapon each time you have to manage side effects. 
 
 ## Reactive process = control flow + behavior
 
+The most common form is the 2-arity reducing function, used by the higher-order functions `reduce` its cousin `transduce`. However, `reduce-kv` takes 3-arity reducing functions, and the `map` transducers returns reducing functions of any arity.
 A reducing function is any function such that the type of the return value is compatible with the type of the first argument.
+
+First, let's define the `ps` function (short for **p**artial **s**end but also a common abbreviation for *process*, which can't be coincidence). Given an agent and a reducing function, `ps` will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
+```clojure
+(def ps (partial partial send))
+```
+
+Next, let's define the `!` function (say *bang*). Given a side-effecting function and optional arguments, `!` will apply the side-effecting function to the arguments and return the function. The sole feature of this function is to be a reducing function, actually it's *the* reducing function that performs the effects held by the accumulator. It will be useful any time we want to see an effect as a reduction.
+```clojure
+(defn !
+  ([f] (f) f)
+  ([f a] (f a) f)
+  ([f a b] (f a b) f)
+  ([f a b c] (f a b c) f)
+  ([f a b c & ds] (apply f a b c ds) f))
+```
+
+We can now leverage agents to thread-safe side-effecting functions.
+```clojure
+(def safe-println (ps (agent println) !))
+```
+
+We now have a function we can use in place of our good old println, and avoid overlapping writes to the output in multithreaded contexts, because the agent will ensure concurrent calls will be enqueued to be processed sequentially.
+
+Now, what if we want our process to have behaviour ? Simple : we'll define our behaviour in a transducer.
 
 Agents & Transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
@@ -38,20 +63,7 @@ Agents & Transducers are complementary.
 
 > any respectable Clojure type supports transducers
 
-First, let's define the `ps` function (for *process*). Given an agent and a reducing function, `ps` will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
-```clojure
-(def ps (partial partial send))
-```
 
-Next, let's define the `!` function (say *bang*). Given a side-effecting function and optional arguments, `!` will apply the side-effecting function to the arguments and return the function.
-```clojure
-(defn !
-  ([f] (f) f)
-  ([f a] (f a) f)
-  ([f a b] (f a b) f)
-  ([f a b c] (f a b c) f)
-  ([f a b c & ds] (apply f a b c ds) f))
-```
 
 
 ## Proactive process with context-aware transducers
@@ -59,8 +71,8 @@ Next, let's define the `!` function (say *bang*). Given a side-effecting functio
 ```clojure
 (defmacro task [& body]
   `(fn [rf#]
-           (send *agent* #(rf# % (do ˜@body)))
-           rf#))
+     (send *agent* #(rf# % (do ˜@body)))
+     rf#))
 (task (slow-inc 0))
 ```
 

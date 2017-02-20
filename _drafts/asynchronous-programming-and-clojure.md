@@ -58,8 +58,8 @@ Next, let's define the ˋ!ˋ function (say *bang*). Given a side-effecting funct
 
 ˋˋˋclojure
 (defmacro task [& body]
-  \ˋ(fn [rf#]
-     (send *agent* #(rf# % (do ˜@body)))
-     rf#))
+  ``ˋ``(fn [rf#]
+         (send *agent* #(rf# % (do ˜@body)))
+         rf#))
 (task (slow-inc 0))
 ˋˋˋ

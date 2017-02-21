@@ -30,6 +30,9 @@ Agents should be your default weapon each time you have to manage side effects. 
 The most common form is the 2-arity reducing function, used by the higher-order functions `reduce` its cousin `transduce`. However, `reduce-kv` takes 3-arity reducing functions, and the `map` transducers returns reducing functions of any arity.
 A reducing function is any function such that the type of the return value is compatible with the type of the first argument.
 
+
+### Agents implement control flow
+
 First, let's define the `ps` function (short for **p**artial **s**end but also a common abbreviation for *process*, which can't be coincidence). Given an agent and a reducing function, `ps` will produce the side-effecting function that schedules the execution of a reduction step with the values you pass.
 ```clojure
 (def ps (partial partial send))
@@ -45,16 +48,19 @@ Next, let's define the `!` function (say *bang*). Given a side-effecting functio
   ([f a b c & ds] (apply f a b c ds) f))
 ```
 
-We can now leverage agents to thread-safe side-effecting functions.
+We can now leverage agents to make side-effecting functions thread-safe.
 ```clojure
 (def safe-println (ps (agent println) !))
 ```
 
 We now have a function we can use in place of our good old println, and avoid overlapping writes to the output in multithreaded contexts, because the agent will ensure concurrent calls will be enqueued to be processed sequentially.
 
-Now, what if we want our process to have behaviour ? Simple : we'll define our behaviour in a transducer.
 
-Agents & Transducers are complementary.
+### Transducers in action
+
+So far, the process we defined has no behaviour : it is just passing all messages it gets to another endpoint. If we want our process to apply a transformation to the stream, we need to define it in the reducing function we pass to send `!`. Fortunately, since 1.7, Clojure provides us with a very convenient way to transform reducing functions.
+
+In fact, agents & transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
 * Transducers are reducing function transformers, and reducing functions are the way you interact with agents
 * Reducing functions produced by transducers may have side-effects, and agents are side-effect-friendly

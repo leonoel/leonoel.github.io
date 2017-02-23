@@ -58,12 +58,39 @@ We now have a function we can use in place of our good old println, and avoid ov
 
 ### Transducers in action
 
-So far, the process we defined has no behaviour : it is just passing all messages it gets to another endpoint. If we want our process to apply a transformation to the stream, we need to define it in the reducing function we pass to send `!`. Fortunately, since 1.7, Clojure provides us with a very convenient way to transform reducing functions.
+So far, the process we defined has no behaviour : it is just passing all messages it gets to another endpoint. If we want our process to apply a transformation to the stream of values, we need to define it in the reducing function we pass to `ps`. Fortunately, since 1.7, Clojure provides us with a very convenient way to [transform reducing functions](https://clojure.org/reference/transducers).
 
 In fact, agents & transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
 * Transducers are reducing function transformers, and reducing functions are the way you interact with agents
-* Reducing functions produced by transducers may have side-effects, and agents are side-effect-friendly
+* Reducing functions produced by transducers may have side-effects, and agents are side-effect-friendly (unlike atoms or refs)
+
+We can leverage transducers to go on improving our `println`. Let's make it look more like a real logger by adding timestamps and verbosity levels.
+
+```clojure
+(def level (zipmap [:debug :info :warn :error :fatal] (range)))
+
+(defn logger [verbosity]
+  (comp (map list)                                                  ;; wrap values in a seq
+        (filter (comp (partial <= (level verbosity)) level first))  ;; take only severe enough
+        (map #(cons (timestamp) %))                                 ;; add a timestamp
+        (partial partial apply)))                                   ;; unwrap values
+```
+
+Now that we have defined our logger behaviour, we can make some instances of it...
+
+```clojure
+(def dev-logger (ps (agent safe-println) ((logger :debug) !)))
+(def prod-logger (ps (agent safe-println) ((logger :warn) !)))
+```
+
+...and log some more or less interesting stuff :
+```clojure
+(dev-logger :info "incoming request")
+(dev-logger :error "")
+```
+
+
 
 > any respectable Scala type has flatMap
 

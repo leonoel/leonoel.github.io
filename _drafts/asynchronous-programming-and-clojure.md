@@ -66,40 +66,62 @@ In fact, agents & transducers are complementary.
 * Reducing functions produced by transducers may have side-effects, and agents are side-effect-friendly (unlike atoms or refs)
 
 We can leverage transducers to go on improving our `println`. Let's make it look more like a real logger by adding timestamps and verbosity levels.
-
 ```clojure
-(def level (zipmap [:debug :info :warn :error :fatal] (range)))
+(import '(java.time ZonedDateTime) '(java.time.format DateTimeFormatter))
+
+(def timestamp #(.format (ZonedDateTime/now) DateTimeFormatter/ISO_INSTANT)
+
+(def severity (zipmap [:debug :info :warn :error :fatal] (range)))
 
 (defn logger [verbosity]
-  (comp (map list)                                                  ;; wrap values in a seq
-        (filter (comp (partial <= (level verbosity)) level first))  ;; take only severe enough
-        (map #(cons (timestamp) %))                                 ;; add a timestamp
-        (partial partial apply)))                                   ;; unwrap values
+  (comp (map list)                                                                 ;; wrap values
+        (filter (comp (fnil (partial <= (severity verbosity)) -1) severity first)) ;; take only severe enough
+        (map #(cons (timestamp) %))                                                ;; add a timestamp
+        (partial partial apply)))                                                  ;; unwrap values
 ```
 
-Now that we have defined our logger behaviour, we can make some instances of it...
-
+Now that we have defined our logger behavior, we can instanciate it...
 ```clojure
-(def dev-logger (ps (agent safe-println) ((logger :debug) !)))
-(def prod-logger (ps (agent safe-println) ((logger :warn) !)))
+(def log (ps (agent safe-println) ((logger :warn) !)))                             ;; log only when severity is warn or more
 ```
 
 ...and log some more or less interesting stuff :
 ```clojure
-(dev-logger :info "incoming request")
-(dev-logger :error "")
+(log :info "incoming request")                                                     ;; nothing happens
+(log :error "bad request format")                                                  ;; writes message with timestamp to stdout
+```
+
+## Context-aware transducers
+
+So far, we are only able to send messages on output in reaction to an incoming message on input. This limitation is due to the nature of transducers as stream processors.
+However, sometimes the result of a transformation may not be available immediately. We may also want to delay message production on purpose. In these situations, we need to be able to react to messages coming from another channel than the transducer input.
+We also need to take care of concurrency, for our process may already be processing a message when the other is ready.
+
+```clojure
+(defn after [t f & args]
+  (future (Thread/sleep t) (apply f args)))
+
+(defn delay-all-1s [rf]
+  (fn [r & args]
+    (apply after 1000 send *agent* rf args)
+    r))
+
+(def delayed-println (ps (agent safe-println) (delay-all-1s !)))
+
+(delayed-println 42)                                                        ;; will print 42, 1 second later
+```
+
+Let's look at delay-all-1s. It looks like a transducer, but it's not. It fails at beeing a transducer because it makes assumptions about the transducing context, that is, beeing run by an agent. If you pass it to `transduce`, it won't work as expected. However, as it stays compatible with transducers, you can compose them freely. You just have to remember to run it on an agent.
+```clojure
+(def delay-all-1s-inc (comp delay-all-1s (map inc)))
+
+(def delayed-inc-println (ps (agent safe-println) (delay-all-1s-inc !)))
+
+(delayed-inc-println 42)          ;; will print 43, 1 second later
 ```
 
 
 
-> any respectable Scala type has flatMap
-
-> any respectable Clojure type supports transducers
-
-
-
-
-## Proactive process with context-aware transducers
 
 ```clojure
 (defmacro task [& body]
@@ -108,4 +130,10 @@ Now that we have defined our logger behaviour, we can make some instances of it.
      rf#))
 (task (slow-inc 0))
 ```
+
+
+
+> any respectable Scala type has flatMap
+
+> any respectable Clojure type supports transducers
 

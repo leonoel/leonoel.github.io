@@ -7,7 +7,7 @@ The title of this post is a reference to [this one](https://alexn.org/blog/2017/
 That said, I'm not here to start a language cock size contest. I like Scala and use it on a daily basis for great good. I also agree with the author in that the [Scala Future](http://docs.scala-lang.org/overviews/core/futures.html) is not optimal and that the [Monix Task](https://monix.io/docs/2x/eval/task.html) is a better default. My point is just to show that this programming style is *almost* available for free in standard Clojure.
 
 
-## Clojure async primitives
+## Clojure asynchronous primitives
 
 Let's have a quick tour of what Clojure provides us.
 
@@ -50,7 +50,7 @@ Next, let's define the `!` function (say *bang*). Given a side-effecting functio
 
 We can now leverage agents to make side-effecting functions thread-safe.
 ```clojure
-(def safe-println (ps (agent println) !))
+(def >out (ps (agent println) !))
 ```
 
 We now have a function we can use in place of our good old println, and avoid overlapping writes to the output in multithreaded contexts, because the agent will ensure concurrent calls will be enqueued to be processed sequentially.
@@ -82,7 +82,7 @@ We can leverage transducers to go on improving our `println`. Let's make it look
 
 Now that we have defined our logger behavior, we can instanciate it...
 ```clojure
-(def log (ps (agent safe-println) ((logger :warn) !)))                             ;; log only when severity is warn or more
+(def log (ps (agent >out) ((logger :warn) !)))                             ;; log only when severity is warn or more
 ```
 
 ...and log some more or less interesting stuff :
@@ -106,32 +106,52 @@ We also need to take care of concurrency, for our process may already be process
     (apply after 1000 send *agent* rf args)
     r))
 
-(def delayed-println (ps (agent safe-println) (delay-all-1s !)))
+(def delayed-println (ps (agent >out) (delay-all-1s !)))
 
 (delayed-println 42)                                                        ;; will print 42, 1 second later
 ```
 
 Let's look at delay-all-1s. It looks like a transducer, but it's not. What makes it fail at beeing a transducer is the reference to `*agent*`, an assumption about the transducing context. If you pass it to `transduce`, it won't work as expected because the transformation is expected to be purely synchronous.
-What we made is a generalization of the idea of transducers to express potentially asynchronous transformations that are meant to be run by an agent. Let's call it a mission, for that's what agents are in charge of. Transducers are a special case of missions.
-Beeing built the same way, missions have the same composability features as transducers. You can compose a mission with a transducer, and what you get is a mission.
+
+What we made is a generalization of the idea of transducers to express potentially asynchronous transformations that are meant to be run by an agent. Let's call it a mission, for that's what agents are in charge of. Transducers are a special case of missions. Beeing built the same way, missions have the same composability features as transducers : you can compose a mission with a transducer, and what you get is a mission.
+
+A mission is the representation of something that has to be done. To get it actually done, instanciate it and assign it to a fresh agent. A mission instance run by an agent defines a process.
+A process is able to process messages sent on its input port.
+A process is able to emit messages on its output port, so you need to supply it with a side-effect function to handle them.
+A process can terminate, in case an action returns a `reduced` result. A terminated agent must stop processing messages.
+A process can fail, in case an exception is thrown. The default behavior in this case should be to [let it crash](http://wiki.c2.com/?LetItCrash) and notify the supervisor of the error so that it can take an appropriate decision (retry, ignore, or propagate)
+```clojure
+(defn | [out err mis]
+  (binding [*agent* (agent out
+                           :validator #(if (reduced? %) (set-error-handler! *agent* nil) true)
+                           :error-handler #(err %2)
+                           :error-mode :fail)]
+    (ps *agent* (mis !))))
+```
+
+
 ```clojure
 (def delay-all-1s-inc (comp delay-all-1s (map inc)))
 
-(def delayed-inc-println (ps (agent safe-println) (delay-all-1s-inc !)))
+(def delayed-inc-println (ps (agent >out) (delay-all-1s-inc !)))
 
 (delayed-inc-println 42)          ;; will print 43, 1 second later
 ```
 
-
-
-
+A task is a mission that takes no input and gives one output or one error
 ```clojure
 (defmacro task [& body]
   `(fn [rf#]
      (send *agent* #(rf# % (do ˜@body)))
      rf#))
-(task (slow-inc 0))
 ```
+
+
+```clojure
+(def ultimate-question-of-life (task (* 6 7)))
+(run >out >err ultimate-question-of-life)
+```
+
 
 
 

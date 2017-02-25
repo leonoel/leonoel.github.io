@@ -56,9 +56,9 @@ We can now leverage agents to make side-effecting functions thread-safe.
 We now have a function we can use in place of our good old println, and avoid overlapping writes to the output in multithreaded contexts, because the agent will ensure concurrent calls will be enqueued to be processed sequentially.
 
 
-### Transducers in action
+### Transducers implement behavior
 
-So far, the process we defined has no behaviour : it is just passing all messages it gets to another endpoint. If we want our process to apply a transformation to the stream of values, we need to define it in the reducing function we pass to `ps`. Fortunately, since 1.7, Clojure provides us with a very convenient way to [transform reducing functions](https://clojure.org/reference/transducers).
+So far, the process we defined has no behavior : it is just passing all messages it gets to another endpoint. If we want our process to apply a transformation to the stream of values, we need to define it in the reducing function we pass to `ps`. Fortunately, since 1.7, Clojure provides us with a very convenient way to [transform reducing functions](https://clojure.org/reference/transducers).
 
 In fact, agents & transducers are complementary.
 * Agents are all about control flow, and transducers are all about behavior
@@ -93,13 +93,13 @@ Now that we have defined our logger behavior, we can instanciate it...
 
 ## Context-aware transducers
 
-So far, we are only able to send messages on output in reaction to an incoming message on input. This limitation is due to the nature of transducers as stream processors.
+So far, we are only able to send messages on output in reaction to an incoming message on input. This limitation is due to the synchronous nature of transducers.
 However, sometimes the result of a transformation may not be available immediately. We may also want to delay message production on purpose. In these situations, we need to be able to react to messages coming from another channel than the transducer input.
 We also need to take care of concurrency, for our process may already be processing a message when the other is ready.
 
 ```clojure
-(defn after [t f & args]
-  (future (Thread/sleep t) (apply f args)))
+(defn after "Applies f to args after t milliseconds, maybe in another thread. Returns immediately."
+  [t f & args] (future (Thread/sleep t) (apply f args)))
 
 (defn delay-all-1s [rf]
   (fn [r & args]
@@ -111,7 +111,9 @@ We also need to take care of concurrency, for our process may already be process
 (delayed-println 42)                                                        ;; will print 42, 1 second later
 ```
 
-Let's look at delay-all-1s. It looks like a transducer, but it's not. It fails at beeing a transducer because it makes assumptions about the transducing context, that is, beeing run by an agent. If you pass it to `transduce`, it won't work as expected. However, as it stays compatible with transducers, you can compose them freely. You just have to remember to run it on an agent.
+Let's look at delay-all-1s. It looks like a transducer, but it's not. What makes it fail at beeing a transducer is the reference to `*agent*`, an assumption about the transducing context. If you pass it to `transduce`, it won't work as expected because the transformation is expected to be purely synchronous.
+What we made is a generalization of the idea of transducers to express potentially asynchronous transformations that are meant to be run by an agent. Let's call it a mission, for that's what agents are in charge of. Transducers are a special case of missions.
+Beeing built the same way, missions have the same composability features as transducers. You can compose a mission with a transducer, and what you get is a mission.
 ```clojure
 (def delay-all-1s-inc (comp delay-all-1s (map inc)))
 

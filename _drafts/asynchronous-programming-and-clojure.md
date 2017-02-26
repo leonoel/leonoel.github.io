@@ -40,12 +40,9 @@ First, let's define the `ps` function (short for **p**artial **s**end but also a
 
 Next, let's define the `!` function (say *bang*). Given a side-effecting function and optional arguments, `!` will apply the side-effecting function to the arguments and return the function. The sole feature of this function is to be a reducing function, actually it's *the* reducing function that performs the effects held by the accumulator. It will be useful any time we want to see an effect as a reduction.
 ```clojure
-(defn !
-  ([f] (f) f)
-  ([f a] (f a) f)
-  ([f a b] (f a b) f)
-  ([f a b c] (f a b c) f)
-  ([f a b c & ds] (apply f a b c ds) f))
+(defn ! [f & args]
+  (apply f args)
+  f)
 ```
 
 We can now leverage agents to make side-effecting functions thread-safe.
@@ -116,27 +113,51 @@ Let's look at delay-all-1s. It looks like a transducer, but it's not. What makes
 What we made is a generalization of the idea of transducers to express potentially asynchronous transformations that are meant to be run by an agent. Let's call it a mission, for that's what agents are in charge of. Transducers are a special case of missions. Beeing built the same way, missions have the same composability features as transducers : you can compose a mission with a transducer, and what you get is a mission.
 
 A mission is the representation of something that has to be done. To get it actually done, instanciate it and assign it to a fresh agent. A mission instance run by an agent defines a process.
-A process is able to process messages sent on its input port.
-A process is able to emit messages on its output port, so you need to supply it with a side-effect function to handle them.
-A process can terminate, in case an action returns a `reduced` result. A terminated agent must stop processing messages.
-A process can fail, in case an exception is thrown. The default behavior in this case should be to [let it crash](http://wiki.c2.com/?LetItCrash) and notify the supervisor of the error so that it can take an appropriate decision (retry, ignore, or propagate)
+* A process is able to process messages sent on its input port.
+* A process is able to emit messages on its output port, so you need to supply it with a side-effect function to handle them.
+* A process can terminate, in case an action returns a `reduced` result. A terminated agent must stop processing messages.
+* A process can fail, in case an uncatched exception is thrown. The right thing to do is this case is to [let it crash](http://wiki.c2.com/?LetItCrash) and notify the supervisor of the error so that it can take an appropriate decision (retry, ignore, or propagate)
+
+Following these rules, `spawn` will be our gateway from the wonderland of composable missions to the dark kingdom of callbacks :
 ```clojure
-(defn | [out err mis]
+(defn check-termination [r]
+  (if (reduced? r) (set-error-handler! *agent* nil) true))
+
+(defn spawn [out err mis]
   (binding [*agent* (agent out
-                           :validator #(if (reduced? %) (set-error-handler! *agent* nil) true)
+                           :validator check-termination
                            :error-handler #(err %2)
                            :error-mode :fail)]
     (ps *agent* (mis !))))
 ```
 
-
+Missions can be parallelized :
 ```clojure
-(def delay-all-1s-inc (comp delay-all-1s (map inc)))
-
-(def delayed-inc-println (ps (agent >out) (delay-all-1s-inc !)))
-
-(delayed-inc-println 42)          ;; will print 43, 1 second later
+(defn par
+  ([mis] mis)
+  ([this-mis that-mis]
+   (fn [rf]
+     (let [this-queue (volatile! empty-queue)
+           that-queue (volatile! empty-queue)
+           this-rf (this-mis (fn [r & args]
+                               (if-let [[that] (seq @that-queue)]
+                                 (do (vswap! that-queue pop) (apply rf r (concat args that)))
+                                 (do (vswap! this-queue conj args) r))))
+           that-ps (spawn (ps *agent* (fn [r & args]
+                                        (if-let [[this] (seq @this-queue)]
+                                          (do (vswap! this-queue pop) (apply rf r (concat this args)))
+                                          (do (vswap! that-queue conj args) r))))
+                          (ps *agent* propagate)
+                          that-mis)]
+       (fn [r & args]
+         (apply that-ps args)                               ;; TODO not parallel, because of nested send
+         (apply this-rf r args)))))
+  ([this-mis that-mis & others]
+   (reduce par (par this-mis that-mis) others)))
 ```
+
+
+
 
 A task is a mission that takes no input and gives one output or one error
 ```clojure
@@ -146,11 +167,21 @@ A task is a mission that takes no input and gives one output or one error
      rf#))
 ```
 
-
+A task can be built from a callback-style action :
 ```clojure
-(def ultimate-question-of-life (task (* 6 7)))
-(run >out >err ultimate-question-of-life)
+(defn propagate [_ t]
+  (throw t))
+
+(defn async [f]
+  (fn [rf]
+    (let [out (ps *agent* rf)
+          err (ps *agent* propagate)]
+      (fn [r & args] (apply f out err args) r))))
 ```
+
+
+
+
 
 
 
@@ -159,3 +190,4 @@ A task is a mission that takes no input and gives one output or one error
 
 > any respectable Clojure type supports transducers
 
+Transducers are one of these hammers that make all problems look like nails.

@@ -133,27 +133,31 @@ Following these rules, `spawn` will be our gateway from the wonderland of compos
 
 Missions can be parallelized :
 ```clojure
-(defn par
+(def empty-queue PersistentQueue/EMPTY)
+
+(defn propagate [_ t]
+  (throw t))
+
+(defn zip
   ([mis] mis)
   ([this-mis that-mis]
    (fn [rf]
      (let [this-queue (volatile! empty-queue)
            that-queue (volatile! empty-queue)
-           this-rf (this-mis (fn [r & args]
-                               (if-let [[that] (seq @that-queue)]
-                                 (do (vswap! that-queue pop) (apply rf r (concat args that)))
-                                 (do (vswap! this-queue conj args) r))))
-           that-ps (spawn (ps *agent* (fn [r & args]
-                                        (if-let [[this] (seq @this-queue)]
-                                          (do (vswap! this-queue pop) (apply rf r (concat this args)))
-                                          (do (vswap! that-queue conj args) r))))
-                          (ps *agent* propagate)
-                          that-mis)]
+           make-rf (fn [this-queue that-queue concat]
+                     (fn [r & args]
+                       (if-let [[that] (seq @that-queue)]
+                         (do (vswap! that-queue pop) (apply rf r (concat args that)))
+                         (do (vswap! this-queue conj args) r))))
+           this-ps (ps *agent* (this-mis (make-rf this-queue that-queue concat)))
+           that-ps (spawn (ps *agent* (make-rf that-queue this-queue #(concat %2 %1)))
+                          (ps *agent* propagate) that-mis)]
        (fn [r & args]
-         (apply that-ps args)                               ;; TODO not parallel, because of nested send
-         (apply this-rf r args)))))
+         (apply this-ps args)
+         (apply that-ps args)
+         r))))
   ([this-mis that-mis & others]
-   (reduce par (par this-mis that-mis) others)))
+   (reduce zip (zip this-mis that-mis) others)))
 ```
 
 
@@ -163,7 +167,7 @@ A task is a mission that takes no input and gives one output or one error
 ```clojure
 (defmacro task [& body]
   `(fn [rf#]
-     (send *agent* #(rf# % (do ˜@body)))
+     (send *agent* #(rf# % (do ~@body)))
      rf#))
 ```
 

@@ -161,7 +161,7 @@ Missions can be parallelized :
 ```
 
 
-
+## Tasks
 
 A task is a mission that takes no input and gives one output or one error
 ```clojure
@@ -173,16 +173,22 @@ A task is a mission that takes no input and gives one output or one error
 
 A task can be built from a callback-style action :
 ```clojure
-(defn propagate [_ t]
-  (throw t))
-
-(defn async [f]
+(defn async [f & args]
   (fn [rf]
-    (let [out (ps *agent* rf)
-          err (ps *agent* propagate)]
-      (fn [r & args] (apply f out err args) r))))
+    (apply f (ps *agent* rf) (ps *agent* propagate) args)))
 ```
 
+```clojure
+(defn run [rf]
+  (let [out (ps *agent* rf)
+        err (ps *agent* propagate)]
+    (fn [r t]
+      (spawn out err t)
+      r)))
+
+(defn maprun [f]
+  (comp (map f) run))
+```
 
 
 

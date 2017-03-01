@@ -178,6 +178,7 @@ A task can be built from a callback-style action :
     (apply f (ps *agent* rf) (ps *agent* propagate) args)))
 ```
 
+Tasks producing tasks can easily be flattened :
 ```clojure
 (defn run [rf]
   (let [out (ps *agent* rf)
@@ -190,6 +191,18 @@ A task can be built from a callback-style action :
   (comp (map f) run))
 ```
 
+Classic monadic stuff allowing us to write for-comprehensions.
+```clojure
+(defmacro for [bindings & body]
+  (if-let [[sym expr & bindings] (seq bindings)]
+    `(comp ~expr (map (fn [~sym] (for [~@bindings] ~@body))) run)
+    `(task ~@body)))
+  
+(for [a (task 1)
+      b (task (inc a))
+      c (task (+ a b))]
+  (+ a b c))
+```
 
 
 

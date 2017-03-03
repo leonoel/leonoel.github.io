@@ -138,26 +138,26 @@ Missions can be parallelized :
 (defn propagate [_ t]
   (throw t))
 
-(defn zip
-  ([mis] mis)
-  ([this-mis that-mis]
-   (fn [rf]
-     (let [this-queue (volatile! empty-queue)
-           that-queue (volatile! empty-queue)
-           make-rf (fn [this-queue that-queue concat]
-                     (fn [r & args]
-                       (if-let [[that] (seq @that-queue)]
-                         (do (vswap! that-queue pop) (apply rf r (concat args that)))
-                         (do (vswap! this-queue conj args) r))))
-           this-ps (ps *agent* (this-mis (make-rf this-queue that-queue concat)))
-           that-ps (spawn (ps *agent* (make-rf that-queue this-queue #(concat %2 %1)))
-                          (ps *agent* propagate) that-mis)]
-       (fn [r & args]
-         (apply this-ps args)
-         (apply that-ps args)
-         r))))
-  ([this-mis that-mis & others]
-   (reduce zip (zip this-mis that-mis) others)))
+(defn zipper [vm xm]
+  (fn [rf]
+    (let [vq (volatile! empty-queue)
+          xq (volatile! empty-queue)
+          vps (spawn (ps *agent* (fn [r v]
+                                   (if-let [[x] (seq @xq)]
+                                     (do (vswap! xq pop) (rf r (conj v x)))
+                                     (do (vswap! vq conj v) r))))
+                     (ps *agent* propagate) vm)
+          xps (ps *agent* (xm (fn [r x]
+                                (if-let [[v] (seq @vq)]
+                                  (do (vswap! vq pop) (rf r (conj v x)))
+                                  (do (vswap! xq conj x) r)))))]
+      (fn [r & args]
+        (apply vps args)
+        (apply xps args)
+        r))))
+
+(defn zip [m & ms]
+  (reduce zipper (comp m (map vector)) ms))
 ```
 
 
@@ -194,9 +194,9 @@ Tasks producing tasks can easily be flattened :
 Classic monadic stuff allowing us to write for-comprehensions.
 ```clojure
 (defmacro for [bindings & body]
-  (if-let [[sym expr & bindings] (seq bindings)]
-    `(comp ~expr (map (fn [~sym] (for [~@bindings] ~@body))) run)
-    `(task ~@body)))
+  (if (< 2 (count bindings))
+    `(comp ~(second bindings) (map (fn [~(first bindings)] (for [~@(nnext bindings)] ~@body))) run)
+    `(comp ~(second bindings) (map (fn [~(first bindings)] ~@body)))))
   
 (for [a (task 1)
       b (task (inc a))

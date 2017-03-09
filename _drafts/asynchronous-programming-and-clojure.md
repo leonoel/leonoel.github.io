@@ -205,7 +205,40 @@ Classic monadic stuff allowing us to write for-comprehensions.
 ```
 
 
+## Streams
 
+A source is a mission that can be requested for data, and eventually outputs a value for each request it gets.
+Similarly, a sink is a mission that can be fed with values, and eventually outputs a request for more data.
+To allow data to flow from a source to sink means to wire each input on the other's output.
+
+A request for more data can be a simple sentinel :
+```clojure
+(defn more [x]
+  (identical? more x))
+```
+
+A sequence can be seen as a source :
+```clojure
+(defn seq-source [xs]
+  (fn [rf]
+    (let [st (volatile! xs)]
+      (fn
+        ([r] (rf r))
+        ([r _]
+          (let [[x & xs] xs
+                r (rf r x)]
+           (if (vreset! st xs) r (reduced r))))))))
+```
+
+```clojure
+(defn flow [s1 s2]
+  (fn [rf]
+    (let [f1 (s1 !)
+          f2 (s2 !)]
+      (fn [r x]
+        
+        ))))
+```
 
 
 

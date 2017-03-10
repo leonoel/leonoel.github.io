@@ -215,29 +215,58 @@ A request for more data can be a simple sentinel :
 ```clojure
 (defn more [x]
   (identical? more x))
+
+(defn eof [x]
+  (identical? eof x))
 ```
 
 A sequence can be seen as a source :
 ```clojure
-(defn seq-source [xs]
+(defn source-seq [xs]
   (fn [rf]
-    (let [st (volatile! xs)]
-      (fn
-        ([r] (rf r))
-        ([r _]
-          (let [[x & xs] xs
-                r (rf r x)]
-           (if (vreset! st xs) r (reduced r))))))))
+    (let [vxs (volatile! xs)]
+      (fn [r _]
+        (if-let [[x & xs] (seq @vxs)]
+          (do (vreset! vxs xs) (rf r x))
+          (rf r eof))))))
 ```
 
 ```clojure
-(defn flow [s1 s2]
+(defn sink-effect [f]
   (fn [rf]
-    (let [f1 (s1 !)
-          f2 (s2 !)]
-      (fn [r x]
-        
-        ))))
+    (send *agent* rf more)
+    (fn [r x]
+      (if (eof x)
+        (reduced r)
+        (do (f x) (rf r more))))))
+
+(defprotocol Stream
+  (init [this pusher puller])
+  (push [this r x])
+  (pull [this r x]))
+  
+(deftype Pipe [rf
+               ^:unsynchronized-mutable push-rf
+               ^:unsynchronized-mutable pull-rf]
+  Stream
+  (init [this pusher puller]
+    (set! push-rf (pusher (partial push this)))
+    (set! pull-rf (puller (partial pull this)))
+    this)
+  (push [_ r x]
+    ((if (more x) rf pull-rf) r x))
+  (pull [_ r x]
+    ((if (more x) push-rf rf) r x))
+  IFn
+  (invoke [_ r x]
+    ((if (more x) pull-rf push-rf) r x)))
+    
+(defn |
+  ([x] x)
+  ([pusher puller]
+   (fn [rf] (init (Pipe. rf nil nil) pusher puller)))
+  ([pusher puller & pullers]
+   (reduce | (| pusher puller) pullers)))
 ```
 
 

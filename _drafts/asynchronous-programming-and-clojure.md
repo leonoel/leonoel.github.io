@@ -213,11 +213,11 @@ To allow data to flow from a source to sink means to wire each input on the othe
 
 A request for more data can be a simple sentinel :
 ```clojure
-(defn more [x]
-  (identical? more x))
+(defmacro defsentinel [name]
+  `(defn ~name [x#] (identical? ~name x#)))
 
-(defn eof [x]
-  (identical? eof x))
+(defsentinel more)
+(defsentinel eof)
 ```
 
 A sequence can be seen as a source :
@@ -240,31 +240,70 @@ A sequence can be seen as a source :
         (reduced r)
         (do (f x) (rf r more))))))
 
-(defprotocol Stream
-  (init [this pusher puller])
-  (push [this r x])
+(defprotocol Pushable
+  (push [this r x]))
+
+(defprotocol Pullable
   (pull [this r x]))
-  
-(deftype Pipe [rf
+
+(deftype Buffer [n xf rf
+                 ^:unsynchronized-mutable process
+                 ^:unsynchronized-mutable buffer]
+  IDeref
+  (deref [this]
+    (set! process (xf (completing (partial push this))))
+    (set! buffer empty-queue)
+    (send *agent* rf more)
+    this)
+
+  Pushable
+  (push [_ r x]
+    (if buffer
+      (do (set! buffer (conj buffer x)) r)
+      (do (set! buffer empty-queue) (rf r x))))
+
+  IFn
+  (invoke [_ r x]
+    (cond
+      (more x)
+      (if-let [[x] (seq buffer)]
+        (let [r (if (= n (count buffer)) (rf r more) r)]
+          (set! buffer (pop buffer))
+          (rf r x))
+        (do (set! buffer nil) r))
+
+      (eof x)
+      (process r)
+
+      :else
+      (let [r (process r x)]
+        (if (< (count buffer) n) (rf r more) r)))))
+
+(defn buffer [n xf]
+  (fn [rf] @(Buffer. n xf rf nil nil)))
+
+(deftype Pipe [rf pusher puller
                ^:unsynchronized-mutable push-rf
                ^:unsynchronized-mutable pull-rf]
-  Stream
-  (init [this pusher puller]
+  IDeref
+  (deref [this]
     (set! push-rf (pusher (partial push this)))
     (set! pull-rf (puller (partial pull this)))
     this)
+  Pushable
   (push [_ r x]
     ((if (more x) rf pull-rf) r x))
+  Pullable
   (pull [_ r x]
     ((if (more x) push-rf rf) r x))
   IFn
   (invoke [_ r x]
     ((if (more x) pull-rf push-rf) r x)))
-    
+
 (defn |
   ([x] x)
   ([pusher puller]
-   (fn [rf] (init (Pipe. rf nil nil) pusher puller)))
+   (fn [rf] @(Pipe. rf pusher puller nil nil)))
   ([pusher puller & pullers]
    (reduce | (| pusher puller) pullers)))
 ```
